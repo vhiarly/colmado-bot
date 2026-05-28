@@ -337,7 +337,7 @@ def webhook():
         msg.body(menu)
 
     # Confirmar orden
-    elif "confirmar" in mensaje_lower:
+    elif any(p in mensaje_lower for p in ["confirmar", "confirma", "si", "sí", "dale", "ok", "okay", "listo", "va", "adelante", "procede"]):
         orden = ordenes_activas[numero_cliente]["items"]
         if orden:
             estados[numero_cliente] = "esperando_direccion"

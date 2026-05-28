@@ -18,7 +18,7 @@ app = Flask(__name__)
 ACCOUNT_SID   = os.getenv("TWILIO_ACCOUNT_SID")
 AUTH_TOKEN    = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
-DUEÑO         = os.getenv("DUEÑO_WHATSAPP")
+DUEÑO         = os.getenv("DUENO_WHATSAPP")
 
 client = Client(ACCOUNT_SID, AUTH_TOKEN)
 

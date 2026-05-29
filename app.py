@@ -1,4 +1,4 @@
-# app.py - Bot de WhatsApp para Colmados V1.5
+# app.py - Bot de WhatsApp para Wasapeame! V1.5
 # Agrega función de quitar productos de la orden
 
 import os
@@ -326,7 +326,7 @@ def webhook():
 
     # Saludo o menú
     if any(p in mensaje_lower for p in ["hola", "buenas", "menu", "menú", "que tienen", "qué tienen"]):
-        menu = "👋 *Bienvenido al Colmado!*\n\n📋 *Nuestros productos:*\n\n"
+        menu = "👋 *Bienvenido a Wasapeame!*\n\n📋 *Nuestros productos:*\n\n"
         for clave, producto in productos.items():
             if producto["cantidad"] > 0:
                 unidad = "/libra" if producto["unidad"] == "libra" else ""

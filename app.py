@@ -2,6 +2,7 @@
 # Agrega función de quitar productos de la orden
 
 import os
+import re
 import threading
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
@@ -342,7 +343,7 @@ def webhook():
         msg.body(menu)
 
     # Confirmar orden
-    elif any(p in mensaje_lower for p in ["confirmar", "confirma", "si", "sí", "dale", "ok", "okay", "listo", "va", "adelante", "procede"]):
+    elif any(re.search(r'\b' + re.escape(p) + r'\b', mensaje_lower) for p in ["confirmar", "confirma", "si", "sí", "dale", "ok", "okay", "listo", "va", "adelante", "procede"]):
         orden = ordenes_activas[numero_cliente]["items"]
         if orden:
             estados[numero_cliente] = "esperando_direccion"

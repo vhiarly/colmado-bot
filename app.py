@@ -11,6 +11,9 @@ from dotenv import load_dotenv
 from inventario import (buscar_producto, parsear_linea_multiple,
                         verificar_disponibilidad, reducir_inventario,
                         productos, buscar_por_alias, normalizar_texto)
+from negocio_router import detectar_codigo, obtener_negocio
+from flujo_pedidos import manejar_pedido, manejar_negocio, tiene_flujo_activo, es_numero_negocio
+from flujo_citas import manejar_cita, manejar_negocio_citas, tiene_flujo_citas, tiene_sesion_admin_citas
 
 load_dotenv()
 
@@ -275,6 +278,44 @@ def webhook():
     if numero_cliente == DUEÑO:
         if "listo" in mensaje_lower:
             procesar_listo_dueno()
+        return str(resp)
+
+    twilio_send = lambda to, body: client.messages.create(body=body, from_=TWILIO_NUMBER, to=to)
+
+    # ── MENSAJES DE NEGOCIOS DEL ROUTER ──
+    codigo_emisor = es_numero_negocio(numero_cliente)
+    if codigo_emisor:
+        neg_emisor = obtener_negocio(codigo_emisor)
+        if neg_emisor and neg_emisor.get("modo") == "citas":
+            resultado = manejar_negocio_citas(numero_cliente, mensaje, twilio_send)
+        else:
+            resultado = manejar_negocio(numero_cliente, codigo_emisor, mensaje, twilio_send)
+        if resultado:
+            msg.body(resultado)
+        return str(resp)
+
+    # ── ADMIN CITAS (pin desde número nuevo o sesión activa) ──
+    if re.match(r"^admin\s+", mensaje_lower) or tiene_sesion_admin_citas(numero_cliente):
+        resultado = manejar_negocio_citas(numero_cliente, mensaje, twilio_send)
+        if resultado:
+            msg.body(resultado)
+            return str(resp)
+
+    # ── ROUTER DE NEGOCIOS (clientes) ──
+    codigo, resto = detectar_codigo(mensaje)
+    if codigo or tiene_flujo_activo(numero_cliente) or tiene_flujo_citas(numero_cliente):
+        msg_flujo = resto if codigo else mensaje
+        if codigo:
+            neg_tmp = obtener_negocio(codigo)
+            modo = neg_tmp.get("modo") if neg_tmp else "pedidos"
+        else:
+            modo = "citas" if tiene_flujo_citas(numero_cliente) else "pedidos"
+        if modo == "citas":
+            respuesta = manejar_cita(numero_cliente, codigo, msg_flujo, twilio_send)
+        else:
+            respuesta = manejar_pedido(numero_cliente, codigo, msg_flujo, twilio_send)
+        if respuesta:
+            msg.body(respuesta)
         return str(resp)
 
     if numero_cliente not in ordenes_activas:

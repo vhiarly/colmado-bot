@@ -1,0 +1,189 @@
+{
+  "prefijos": {
+    "CO": {
+      "tipo": "Colmado",
+      "modo": "pedidos"
+    },
+    "MM": {
+      "tipo": "Mini Market",
+      "modo": "pedidos"
+    },
+    "RE": {
+      "tipo": "Restaurante",
+      "modo": "pedidos"
+    },
+    "FT": {
+      "tipo": "Food Truck",
+      "modo": "pedidos"
+    },
+    "PZ": {
+      "tipo": "Pizzería",
+      "modo": "pedidos"
+    },
+    "FA": {
+      "tipo": "Farmacia",
+      "modo": "pedidos"
+    },
+    "LI": {
+      "tipo": "Licorería",
+      "modo": "pedidos"
+    },
+    "BA": {
+      "tipo": "Barbería",
+      "modo": "citas"
+    },
+    "SA": {
+      "tipo": "Salón",
+      "modo": "citas"
+    },
+    "NP": {
+      "tipo": "Nail Parlor",
+      "modo": "citas"
+    },
+    "MA": {
+      "tipo": "Masajes/Spa",
+      "modo": "citas"
+    },
+    "ME": {
+      "tipo": "Médico",
+      "modo": "citas"
+    },
+    "SE": {
+      "tipo": "Servicios",
+      "modo": "citas"
+    }
+  },
+  "negocios": {
+    "CO1": {
+      "nombre": "Colmado El Ejemplo",
+      "modo": "pedidos",
+      "tipo": "CO",
+      "activo": true,
+      "numero_negocio": "whatsapp:+18091234567",
+      "pin": "1234",
+      "catalogo": {
+        "salami": {
+          "nombre": "Salami",
+          "precio": 80,
+          "unidad": "libra",
+          "cantidad": 20,
+          "rebanado": true,
+          "activo": true
+        },
+        "presidente": {
+          "nombre": "Presidente",
+          "precio": 120,
+          "unidad": "unidad",
+          "cantidad": 50,
+          "rebanado": false,
+          "activo": true
+        },
+        "arroz": {
+          "nombre": "Arroz",
+          "precio": 45,
+          "unidad": "libra",
+          "cantidad": 100,
+          "rebanado": false,
+          "activo": true
+        }
+      }
+    },
+    "BA1": {
+      "nombre": "Carlos Barbero",
+      "modo": "citas",
+      "tipo": "BA",
+      "activo": true,
+      "numero_negocio": "whatsapp:+18097654321",
+      "pin": "5678",
+      "horario": {
+        "lunes": {
+          "trabaja": true,
+          "inicio": "09:00",
+          "fin": "20:00"
+        },
+        "martes": {
+          "trabaja": true,
+          "inicio": "09:00",
+          "fin": "20:00"
+        },
+        "miercoles": {
+          "trabaja": true,
+          "inicio": "12:00",
+          "fin": "22:00"
+        },
+        "jueves": {
+          "trabaja": true,
+          "inicio": "12:00",
+          "fin": "22:00"
+        },
+        "viernes": {
+          "trabaja": true,
+          "inicio": "12:00",
+          "fin": "01:00"
+        },
+        "sabado": {
+          "trabaja": true,
+          "inicio": "12:00",
+          "fin": "01:00"
+        },
+        "domingo": {
+          "trabaja": false,
+          "inicio": null,
+          "fin": null
+        }
+      },
+      "servicios": {
+        "corte_simple": {
+          "nombre": "Corte simple",
+          "duracion_minutos": 30,
+          "precio": 350,
+          "activo": true
+        },
+        "corte_barba": {
+          "nombre": "Corte + Barba",
+          "duracion_minutos": 60,
+          "precio": 550,
+          "activo": true
+        },
+        "barba_sola": {
+          "nombre": "Barba sola",
+          "duracion_minutos": 30,
+          "precio": 250,
+          "activo": true
+        }
+      },
+      "bloqueos": [
+        {
+          "fecha": "2026-05-30",
+          "desde": "17:21",
+          "hasta": "17:00"
+        },
+        {
+          "fecha": "2026-05-30",
+          "desde": "17:21",
+          "hasta": "23:59"
+        },
+        {
+          "fecha": "2026-06-01",
+          "desde": "00:00",
+          "hasta": "23:59"
+        },
+        {
+          "fecha": "2026-05-30",
+          "desde": "17:23",
+          "hasta": "23:00"
+        }
+      ],
+      "citas": [
+        {
+          "numero_cliente": "whatsapp:+18092220000",
+          "servicio": "corte_simple",
+          "nombre_servicio": "Corte simple",
+          "fecha": "2026-06-01",
+          "hora": "09:00",
+          "duracion_minutos": 30
+        }
+      ]
+    }
+  }
+}

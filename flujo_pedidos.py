@@ -221,7 +221,9 @@ def manejar_negocio(numero_negocio, codigo_negocio, mensaje, twilio_send):
     m = re.match(r"no\s+hay\s+(.+)", msg)
     if m:
         buscado = m.group(1).strip()
-        for cliente, pedido in list(_ordenes_pendientes.items()):
+        print(f"[DEBUG no hay] negocio={codigo_negocio} buscado='{buscado}' ordenes_pendientes={list(_ordenes_pendientes.keys())}")
+        # Itera en orden inverso para tomar el pedido más reciente primero
+        for cliente, pedido in reversed(list(_ordenes_pendientes.items())):
             if pedido["codigo"] != codigo_negocio:
                 continue
             for item in pedido["items"]:
@@ -236,9 +238,10 @@ def manejar_negocio(numero_negocio, codigo_negocio, mensaje, twilio_send):
 
     # "listo" → pedido despachado
     if re.search(r"\blisto\b", msg):
+        print(f"[DEBUG listo] negocio={codigo_negocio} ordenes_pendientes={list(_ordenes_pendientes.keys())}")
         for cliente, pedido in list(_ordenes_pendientes.items()):
             if pedido["codigo"] == codigo_negocio:
-                twilio_send(cliente, "Tu pedido esta en camino!")
+                twilio_send(cliente, "🛵 Tu pedido esta en camino!")
                 _ordenes_pendientes.pop(cliente, None)
                 _estados.pop(cliente, None)
                 return f"Pedido de {cliente} marcado como completado."

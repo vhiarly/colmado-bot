@@ -1,3 +1,4 @@
+import json
 import re
 from negocio_router import cargar_negocios, obtener_negocio
 
@@ -93,6 +94,71 @@ def es_numero_negocio(numero):
     return None
 
 
+# ── Persistencia de pedidos ───────────────────────────────────────────────────
+
+def _guardar(datos):
+    import negocio_router
+    with open("negocios.json", "w", encoding="utf-8") as f:
+        json.dump(datos, f, ensure_ascii=False, indent=2)
+    negocio_router._negocios_cache = datos
+
+
+def _guardar_pedido(codigo, numero_cliente):
+    datos = cargar_negocios()
+    pedido = _ordenes_pendientes[numero_cliente]
+    activos = datos["negocios"][codigo].setdefault("pedidos_activos", [])
+    activos[:] = [p for p in activos if p["numero_cliente"] != numero_cliente]
+    activos.append({
+        "numero_cliente": numero_cliente,
+        "items":          pedido["items"],
+        "total":          pedido["total"],
+        "direccion":      pedido["direccion"],
+        "referencia":     pedido["referencia"],
+    })
+    _guardar(datos)
+
+
+def _eliminar_pedido(codigo, numero_cliente):
+    datos = cargar_negocios()
+    neg = datos["negocios"].get(codigo)
+    if not neg:
+        return
+    neg["pedidos_activos"] = [
+        p for p in neg.get("pedidos_activos", [])
+        if p["numero_cliente"] != numero_cliente
+    ]
+    _guardar(datos)
+
+
+def _cargar_pedidos_al_inicio():
+    try:
+        datos = cargar_negocios()
+        for codigo, neg in datos["negocios"].items():
+            for pedido in neg.get("pedidos_activos", []):
+                nc = pedido["numero_cliente"]
+                _ordenes_pendientes[nc] = {
+                    "codigo":    codigo,
+                    "items":     pedido["items"],
+                    "total":     pedido["total"],
+                    "direccion": pedido["direccion"],
+                    "referencia": pedido["referencia"],
+                }
+                # Restaurar estado para que el cliente pueda cancelar
+                _estados[nc] = {
+                    "codigo":    codigo,
+                    "items":     pedido["items"],
+                    "estado":    "pedido_enviado",
+                    "direccion": pedido["direccion"],
+                    "referencia": pedido["referencia"],
+                }
+        print(f"[INICIO] Pedidos cargados desde disco: {list(_ordenes_pendientes.keys())}")
+    except Exception as e:
+        print(f"[INICIO] Error cargando pedidos: {e}")
+
+
+_cargar_pedidos_al_inicio()
+
+
 def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
     """
     Maneja el flujo completo de pedidos de un negocio.
@@ -126,6 +192,7 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
                         f"El cliente {numero_cliente} cancelo su pedido.")
         _estados.pop(numero_cliente, None)
         _ordenes_pendientes.pop(numero_cliente, None)
+        _eliminar_pedido(codigo, numero_cliente)
         return "Orden cancelada. Escribe el codigo del negocio cuando quieras pedir de nuevo."
 
     # ── PIDIENDO ──
@@ -179,6 +246,7 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
             "codigo": codigo, "items": list(items), "total": total,
             "direccion": estado["direccion"], "referencia": estado["referencia"],
         }
+        _guardar_pedido(codigo, numero_cliente)
         estado["estado"] = "pedido_enviado"
 
         # Notificar al negocio
@@ -242,6 +310,7 @@ def manejar_negocio(numero_negocio, codigo_negocio, mensaje, twilio_send):
         for cliente, pedido in list(_ordenes_pendientes.items()):
             if pedido["codigo"] == codigo_negocio:
                 twilio_send(cliente, "🛵 Tu pedido esta en camino!")
+                _eliminar_pedido(codigo_negocio, cliente)
                 _ordenes_pendientes.pop(cliente, None)
                 _estados.pop(cliente, None)
                 return f"Pedido de {cliente} marcado como completado."

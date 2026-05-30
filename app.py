@@ -22,10 +22,11 @@ DUEÑO         = os.getenv("DUENO_WHATSAPP")
 
 client = Client(ACCOUNT_SID, AUTH_TOKEN)
 
-ordenes_activas = {}
-estados         = {}
-cola_rebanado   = {}
-timers          = {}
+ordenes_activas  = {}
+estados          = {}
+cola_rebanado    = {}
+timers           = {}
+contador_turnos  = 0
 
 # Palabras para cancelar toda la orden
 PALABRAS_CANCELAR = [
@@ -136,13 +137,13 @@ def mostrar_orden(numero_cliente):
     return texto
 
 
-def notificar_dueno(numero_cliente):
+def notificar_dueno(numero_cliente, turno):
     orden      = ordenes_activas[numero_cliente]["items"]
     direccion  = ordenes_activas[numero_cliente]["direccion"]
     referencia = ordenes_activas[numero_cliente]["referencia"]
     total      = sum(i["precio"] for i in orden)
 
-    texto = "🔔 *ORDEN NUEVA*\n\n"
+    texto = f"🔔 *ORDEN NUEVA — Turno #T-{turno}*\n\n"
     texto += "🛒 *Pedido:*\n"
     for item in orden:
         texto += formato_item(item) + "\n"
@@ -299,14 +300,18 @@ def webhook():
 
     # ── ESPERANDO REFERENCIA ──
     if estado_actual == "esperando_referencia":
+        global contador_turnos
         referencia = mensaje if mensaje_lower != "ninguna" else "Sin referencia"
         ordenes_activas[numero_cliente]["referencia"] = referencia
         estados[numero_cliente] = "pidiendo"
 
+        contador_turnos += 1
+        turno = contador_turnos
+
         orden = ordenes_activas[numero_cliente]["items"]
         total = sum(i["precio"] for i in orden)
 
-        resumen = "✅ *Orden confirmada!*\n\n"
+        resumen = f"✅ *Orden confirmada! — Turno #T-{turno}*\n\n"
         resumen += "🛒 *Tu pedido:*\n"
         for item in orden:
             resumen += formato_item(item) + "\n"
@@ -317,7 +322,7 @@ def webhook():
         resumen += "¡Tu orden está en camino pronto! 🛵"
         msg.body(resumen)
 
-        notificar_dueno(numero_cliente)
+        notificar_dueno(numero_cliente, turno)
         detener_timer(numero_cliente)
         limpiar_orden(numero_cliente)
         return str(resp)

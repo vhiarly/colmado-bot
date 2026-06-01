@@ -71,6 +71,24 @@ Para tareas de múltiples pasos:
 
 ---
 
+## 5. RESPONSE STYLE
+
+- Responde en palabras mínimas, sin preámbulo
+- Sin resumen al final de la respuesta
+- Sin frases de relleno: "here is", "I will", "of course", "great", "sure"
+- Empieza siempre directamente con la respuesta
+- En edits de código: muestra solo las líneas cambiadas con 3 líneas de contexto, nunca el archivo completo
+- Para tareas simples usa razonamiento mínimo
+
+---
+
+## 6. SESSION HANDOFF
+
+- Al terminar cada sesión, escribe un resumen de máximo 200 tokens en `.claude/SESSION_[fecha].md`
+- El resumen debe incluir: qué se construyó, qué quedó incompleto, y qué hacer primero la próxima sesión
+
+---
+
 ## Contexto técnico rápido
 
 ```

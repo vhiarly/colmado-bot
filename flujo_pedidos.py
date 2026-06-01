@@ -44,17 +44,22 @@ def _extraer_cantidad(msg, nombre_norm, unidad):
 
 
 def _parsear_productos(mensaje, catalogo):
+    """Retorna (disponibles, agotados). disponibles = lista de tuplas; agotados = lista de nombres."""
     msg = _norm(mensaje)
-    encontrados = []
+    disponibles = []
+    agotados = []
     for clave, prod in catalogo.items():
-        if not prod.get("activo", True) or prod.get("cantidad", 1) <= 0:
+        if not prod.get("activo", True):
             continue
         nombre_norm = _norm(prod["nombre"])
         if nombre_norm not in msg and clave not in msg:
             continue
+        if prod.get("cantidad", 1) <= 0:
+            agotados.append(prod["nombre"])
+            continue
         cantidad, texto = _extraer_cantidad(msg, nombre_norm, prod["unidad"])
-        encontrados.append((clave, prod, cantidad, texto))
-    return encontrados
+        disponibles.append((clave, prod, cantidad, texto))
+    return disponibles, agotados
 
 
 def _fmt(item):
@@ -69,7 +74,7 @@ def _menu(negocio):
         if prod.get("activo", True) and prod.get("cantidad", 1) > 0:
             suf = "/libra" if prod["unidad"] == "libra" else ""
             lineas.append(f"• {prod['nombre']} - ${prod['precio']} pesos{suf}")
-    lineas += ["", "Escribe lo que quieres pedir.", "Escribe cancelar para salir."]
+    lineas += ["", "Escribe lo que quieres pedir.", "Escribe *cancelar* para salir."]
     return "\n".join(lineas)
 
 
@@ -188,7 +193,7 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
 
     # Cancelar desde cualquier estado
     if any(re.search(r"\b" + p + r"\b", msg) for p in _CANCELAR):
-        if s == "pedido_enviado":
+        if s in ("pedido_enviado", "esperando_decision"):
             twilio_send(negocio["numero_negocio"],
                         f"El cliente {numero_cliente} cancelo su pedido.")
         _estados.pop(numero_cliente, None)
@@ -203,22 +208,29 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
 
         if any(re.search(r"\b" + p + r"\b", msg) for p in _CONFIRMAR):
             if not estado["items"]:
-                return "No tienes productos en tu orden. Escribe menu para ver lo que tenemos."
+                return "No tienes productos en tu orden. Escribe *menú* para ver lo que tenemos."
             estado["estado"] = "esperando_confirmacion"
             return _resumen(estado["items"],
-                            "\nEscribe si para confirmar o cancelar para salir.")
+                            "\nEscribe *sí* para confirmar o *cancelar* para salir.")
 
-        resultados = _parsear_productos(mensaje, negocio.get("catalogo", {}))
-        if not resultados:
-            return "No encontre ese producto. Escribe menu para ver lo que tenemos."
+        disponibles, agotados = _parsear_productos(mensaje, negocio.get("catalogo", {}))
 
-        for clave, prod, cantidad, texto in resultados:
+        if not disponibles:
+            if agotados:
+                return "Ese producto está agotado ahorita. Escribe *menú* para ver lo que tenemos."
+            return "No encontre ese producto. Escribe *menú* para ver lo que tenemos."
+
+        for clave, prod, cantidad, texto in disponibles:
             estado["items"].append({
                 "clave": clave, "nombre": prod["nombre"],
                 "cantidad": cantidad, "texto": texto,
                 "unidad": prod["unidad"], "precio": prod["precio"] * cantidad,
             })
-        return _resumen(estado["items"], "\nEscribe mas productos o confirmar para pedir.")
+
+        respuesta = _resumen(estado["items"], "\nEscribe mas productos o *confirmar* para pedir.")
+        if agotados:
+            respuesta += f"\n\n(Nota: {', '.join(agotados)} está agotado y no se agregó a tu orden.)"
+        return respuesta
 
     # ── ESPERANDO CONFIRMACION ──
     if s == "esperando_confirmacion":
@@ -227,7 +239,7 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
             return ("A que direccion te enviamos?\n\n"
                     "Ejemplo: Calle Duarte 45, Los Jardines, Santo Domingo")
         return _resumen(estado["items"],
-                        "\nEscribe si para confirmar o cancelar para salir.")
+                        "\nEscribe *sí* para confirmar o *cancelar* para salir.")
 
     # ── ESPERANDO DIRECCIÓN ──
     if s == "esperando_direccion":
@@ -235,7 +247,7 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
         estado["estado"] = "esperando_referencia"
         return ("Alguna referencia para encontrarte mas facil?\n\n"
                 "Ejemplo: Al lado de la farmacia, Casa azul\n\n"
-                "Si no tienes, escribe ninguna.")
+                "Si no tienes, escribe *ninguna*.")
 
     # ── ESPERANDO REFERENCIA ──
     if s == "esperando_referencia":
@@ -267,7 +279,7 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
         r += f"\nDireccion: {estado['direccion']}"
         r += f"\nReferencia: {estado['referencia']}"
         r += "\n\n*Tu pedido esta PENDIENTE — algo podria no estar disponible.*"
-        r += "\n\nPuedes escribir cancelar si cambias de opinion antes de que sea procesado."
+        r += "\n\nPuedes escribir *cancelar* si cambias de opinion antes de que sea procesado."
         r += "\n\n*Recuerda: tu pedido sigue PENDIENTE hasta que el negocio lo confirme.*"
         return r
 
@@ -277,11 +289,41 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
             estado["estado"] = "ajustando"
             return (_resumen(estado["items"]) +
                     "\n\nQue quieres cambiar?\n\n"
-                    "• quitar [producto] para eliminarlo\n"
+                    "• *quitar* [producto] para eliminarlo\n"
                     "• escribe un producto para agregarlo\n"
-                    "• listo para confirmar los cambios")
+                    "• *listo* para confirmar los cambios")
         return ("*Tu pedido esta pendiente.*\n\n"
-                "Escribe ajustar para modificarlo o cancelar para cancelarlo.")
+                "Escribe *ajustar* para modificarlo o *cancelar* para cancelarlo.")
+
+    # ── ESPERANDO DECISION (producto no disponible) ──
+    if s == "esperando_decision":
+        item = estado.get("item_sin_stock", {})
+        nombre = item.get("nombre", "ese producto")
+
+        if "continuar" in msg:
+            estado["items"] = [i for i in estado["items"] if i["clave"] != item.get("clave")]
+            if not estado["items"]:
+                _estados.pop(numero_cliente, None)
+                _ordenes_pendientes.pop(numero_cliente, None)
+                _eliminar_pedido(codigo, numero_cliente)
+                return "Tu pedido quedó vacío. Escribe el codigo del negocio cuando quieras hacer un nuevo pedido."
+            total = sum(i["precio"] for i in estado["items"])
+            _ordenes_pendientes[numero_cliente] = {
+                "codigo": codigo, "items": list(estado["items"]), "total": total,
+                "direccion": estado["direccion"], "referencia": estado["referencia"],
+            }
+            _guardar_pedido(codigo, numero_cliente)
+            estado["estado"] = "pedido_enviado"
+            estado.pop("item_sin_stock", None)
+            txt  = f"PEDIDO ACTUALIZADO de {numero_cliente} — se eliminó {nombre}\n\n"
+            txt += "\n".join(_fmt(i) for i in estado["items"])
+            txt += f"\n\nTotal: ${total:.0f} pesos"
+            twilio_send(negocio["numero_negocio"], txt)
+            return _resumen(estado["items"], "\n\nPedido actualizado. Tu orden sigue en camino.")
+
+        return (f"¿Qué prefieres?\n\n"
+                f"• Escribe *continuar* para seguir sin {nombre}\n"
+                f"• Escribe *cancelar* para cancelar el pedido")
 
     # ── AJUSTANDO ──
     if s == "ajustando":
@@ -312,20 +354,22 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
             if len(estado["items"]) == antes:
                 return f"No encontre '{buscado}' en tu pedido."
             if not estado["items"]:
-                return "Eliminaste todos los productos. Agrega algo o escribe cancelar."
-            return _resumen(estado["items"], "\nSigue ajustando o escribe listo para confirmar.")
+                return "Eliminaste todos los productos. Agrega algo o escribe *cancelar*."
+            return _resumen(estado["items"], "\nSigue ajustando o escribe *listo* para confirmar.")
 
-        resultados = _parsear_productos(mensaje, negocio.get("catalogo", {}))
-        if resultados:
-            for clave, prod, cantidad, texto in resultados:
+        disponibles, agotados = _parsear_productos(mensaje, negocio.get("catalogo", {}))
+        if disponibles:
+            for clave, prod, cantidad, texto in disponibles:
                 estado["items"].append({
                     "clave": clave, "nombre": prod["nombre"],
                     "cantidad": cantidad, "texto": texto,
                     "unidad": prod["unidad"], "precio": prod["precio"] * cantidad,
                 })
-            return _resumen(estado["items"], "\nSigue ajustando o escribe listo para confirmar.")
+            return _resumen(estado["items"], "\nSigue ajustando o escribe *listo* para confirmar.")
+        if agotados:
+            return "Ese producto está agotado ahorita. Escribe *menú* para ver lo que tenemos."
 
-        return ("No entendi. Escribe quitar [producto], agrega un producto, o listo para confirmar.")
+        return "No entendi. Escribe *quitar* [producto], agrega un producto, o *listo* para confirmar."
 
     return None
 
@@ -348,10 +392,14 @@ def manejar_negocio(numero_negocio, codigo_negocio, mensaje, twilio_send):
                 continue
             for item in pedido["items"]:
                 if buscado in _norm(item["nombre"]):
+                    if cliente in _estados:
+                        _estados[cliente]["estado"] = "esperando_decision"
+                        _estados[cliente]["item_sin_stock"] = item
                     twilio_send(
                         cliente,
-                        f"Lo sentimos, *{item['nombre']}* no esta disponible en tu pedido.\n\n"
-                        "El negocio te contactara para ajustar o cancelar."
+                        f"Lo sentimos, *{item['nombre']}* no está disponible. ¿Qué prefieres?\n\n"
+                        "• Escribe *continuar* para seguir sin ese producto\n"
+                        "• Escribe *cancelar* para cancelar el pedido"
                     )
                     return f"Cliente notificado sobre {item['nombre']}."
         return "No encontre pedidos pendientes con ese producto."

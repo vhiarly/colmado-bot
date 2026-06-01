@@ -1,5 +1,5 @@
 # Wasapeame — CLAUDE.md
-# Bot de WhatsApp para colmados dominicanos
+# Plataforma de WhatsApp bots para negocios locales — caso de uso inicial: colmados dominicanos
 # Stack: Python · Flask · Twilio · Render
 
 ---
@@ -99,4 +99,4 @@ Estado:      En memoria (dict por número de teléfono)
 
 ---
 
-*Basado en los principios de Andrej Karpathy — enero 2026*
+*Basado en Claude Code best practices — Boris Cherny, Anthropic*

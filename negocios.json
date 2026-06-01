@@ -87,7 +87,9 @@
           "activo": true
         }
       },
-      "pedidos_activos": []
+      "pedidos_activos": [],
+      "contador_turnos": 1,
+      "cola_turnos": []
     },
     "BA1": {
       "nombre": "Carlos Barbero",

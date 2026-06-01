@@ -3,7 +3,9 @@ import re
 from negocio_router import cargar_negocios, obtener_negocio
 
 _estados = {}           # numero_cliente -> {codigo, items, estado, direccion, referencia}
-_ordenes_pendientes = {}  # numero_cliente -> {codigo, items, total, direccion, referencia}
+_ordenes_pendientes = {}  # numero_cliente -> {codigo, turno, items, total, direccion, referencia}
+_colas      = {}        # codigo -> [numero_cliente, ...] en orden FIFO
+_contadores = {}        # codigo -> int (último turno asignado)
 
 _CONFIRMAR = {"confirmar", "confirma", "si", "sí", "dale", "ok", "okay", "listo", "va", "adelante", "procede"}
 _CANCELAR  = {"cancelar", "cancel", "salir", "exit", "bye", "chao", "nada", "olvida", "adios", "adiós"}
@@ -87,6 +89,31 @@ def _resumen(items, pie=""):
     return "\n".join(lineas)
 
 
+def _siguiente_turno(codigo):
+    n = _contadores.get(codigo, 0) + 1
+    _contadores[codigo] = n
+    return n
+
+
+def _notificar_posiciones(codigo, twilio_send):
+    """Envía a cada cliente en espera (índice 1+) su posición actualizada en la cola."""
+    cola = _colas.get(codigo, [])
+    for i, cliente in enumerate(cola[1:], start=1):
+        s = "s" if i > 1 else ""
+        twilio_send(cliente, f"Hay {i} pedido{s} antes que el tuyo. Te avisamos cuando sea tu turno.")
+
+
+def _enviar_pedido_a_negocio(numero_negocio, cliente, pedido, twilio_send, prefijo="NUEVO PEDIDO"):
+    turno = pedido.get("turno", "?")
+    txt  = f"{prefijo} — Turno #T-{turno} de {cliente}\n\n"
+    txt += "\n".join(_fmt(i) for i in pedido.get("items", []))
+    txt += f"\n\nTotal: ${pedido.get('total', 0):.0f} pesos"
+    txt += f"\nDireccion: {pedido.get('direccion', '')}"
+    txt += f"\nReferencia: {pedido.get('referencia', '')}"
+    txt += "\n\nSi algo no esta disponible escribe: no hay [producto]"
+    twilio_send(numero_negocio, txt)
+
+
 def tiene_flujo_activo(numero_cliente):
     return numero_cliente in _estados
 
@@ -95,6 +122,9 @@ def limpiar_flujo(numero_cliente):
     estado = _estados.get(numero_cliente, {})
     codigo = estado.get("codigo")
     if codigo:
+        cola = _colas.get(codigo, [])
+        if numero_cliente in cola:
+            cola.remove(numero_cliente)
         _eliminar_pedido(codigo, numero_cliente)
     _estados.pop(numero_cliente, None)
     _ordenes_pendientes.pop(numero_cliente, None)
@@ -122,15 +152,19 @@ def _guardar(datos):
 def _guardar_pedido(codigo, numero_cliente):
     datos = cargar_negocios()
     pedido = _ordenes_pendientes[numero_cliente]
-    activos = datos["negocios"][codigo].setdefault("pedidos_activos", [])
+    neg = datos["negocios"][codigo]
+    activos = neg.setdefault("pedidos_activos", [])
     activos[:] = [p for p in activos if p["numero_cliente"] != numero_cliente]
     activos.append({
         "numero_cliente": numero_cliente,
+        "turno":          pedido.get("turno"),
         "items":          pedido["items"],
         "total":          pedido["total"],
         "direccion":      pedido["direccion"],
         "referencia":     pedido["referencia"],
     })
+    neg["contador_turnos"] = _contadores.get(codigo, 0)
+    neg["cola_turnos"] = list(_colas.get(codigo, []))
     _guardar(datos)
 
 
@@ -143,6 +177,7 @@ def _eliminar_pedido(codigo, numero_cliente):
         p for p in neg.get("pedidos_activos", [])
         if p["numero_cliente"] != numero_cliente
     ]
+    neg["cola_turnos"] = list(_colas.get(codigo, []))
     _guardar(datos)
 
 
@@ -150,16 +185,18 @@ def _cargar_pedidos_al_inicio():
     try:
         datos = cargar_negocios()
         for codigo, neg in datos["negocios"].items():
+            _colas[codigo]      = neg.get("cola_turnos", [])
+            _contadores[codigo] = neg.get("contador_turnos", 0)
             for pedido in neg.get("pedidos_activos", []):
                 nc = pedido["numero_cliente"]
                 _ordenes_pendientes[nc] = {
                     "codigo":    codigo,
+                    "turno":     pedido.get("turno"),
                     "items":     pedido["items"],
                     "total":     pedido["total"],
                     "direccion": pedido["direccion"],
                     "referencia": pedido["referencia"],
                 }
-                # Restaurar estado para que el cliente pueda cancelar
                 _estados[nc] = {
                     "codigo":    codigo,
                     "items":     pedido["items"],
@@ -203,12 +240,26 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
 
     # Cancelar desde cualquier estado
     if any(re.search(r"\b" + p + r"\b", msg) for p in _CANCELAR):
+        era_primero = False
         if s in ("pedido_enviado", "esperando_decision"):
+            cola = _colas.get(codigo, [])
+            era_primero = bool(cola) and cola[0] == numero_cliente
+            if numero_cliente in cola:
+                cola.remove(numero_cliente)
             twilio_send(negocio["numero_negocio"],
                         f"El cliente {numero_cliente} cancelo su pedido.")
         _estados.pop(numero_cliente, None)
         _ordenes_pendientes.pop(numero_cliente, None)
         _eliminar_pedido(codigo, numero_cliente)
+        if era_primero:
+            cola_actual = _colas.get(codigo, [])
+            if cola_actual:
+                siguiente = cola_actual[0]
+                _enviar_pedido_a_negocio(negocio["numero_negocio"], siguiente,
+                                         _ordenes_pendientes[siguiente], twilio_send,
+                                         prefijo="SIGUIENTE PEDIDO")
+                twilio_send(siguiente, "Tu pedido está siendo preparado, sale en unos minutos!")
+                _notificar_posiciones(codigo, twilio_send)
         return "Orden cancelada. Escribe el codigo del negocio cuando quieras pedir de nuevo."
 
     # ── PIDIENDO ──
@@ -280,32 +331,35 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
         items = estado["items"]
         total = sum(i["precio"] for i in items)
 
+        turno = _siguiente_turno(codigo)
+        cola  = _colas.setdefault(codigo, [])
+        cola.append(numero_cliente)
+        posicion = len(cola)
+
         _ordenes_pendientes[numero_cliente] = {
             "codigo": codigo, "items": list(items), "total": total,
+            "turno": turno,
             "direccion": estado["direccion"], "referencia": estado["referencia"],
         }
         _guardar_pedido(codigo, numero_cliente)
         estado["estado"] = "pedido_enviado"
 
-        # Notificar al negocio
-        txt  = f"NUEVO PEDIDO de {numero_cliente}\n\n"
-        txt += "\n".join(_fmt(i) for i in items)
-        txt += f"\n\nTotal: ${total:.0f} pesos"
-        txt += f"\nDireccion: {estado['direccion']}"
-        txt += f"\nReferencia: {estado['referencia']}"
-        txt += "\n\nSi algo no esta disponible escribe: no hay [producto]"
-        twilio_send(negocio["numero_negocio"], txt)
+        if posicion == 1:
+            _enviar_pedido_a_negocio(negocio["numero_negocio"], numero_cliente,
+                                     _ordenes_pendientes[numero_cliente], twilio_send)
 
-        # Confirmación al cliente — 2 recordatorios en negrita
-        r  = f"Pedido enviado a {negocio['nombre']}!\n\n"
+        r  = f"Pedido enviado a {negocio['nombre']}! Turno *#T-{turno}*\n\n"
         r += "Tu pedido:\n"
         r += "\n".join(_fmt(i) for i in items)
         r += f"\n\nTotal: ${total:.0f} pesos"
         r += f"\nDireccion: {estado['direccion']}"
         r += f"\nReferencia: {estado['referencia']}"
-        r += "\n\n*Tu pedido esta PENDIENTE — algo podria no estar disponible.*"
+        if posicion == 1:
+            r += "\n\n*Tu pedido está siendo preparado.*"
+        else:
+            s_plural = "s" if posicion - 1 > 1 else ""
+            r += f"\n\nHay {posicion - 1} pedido{s_plural} antes que el tuyo. Te avisamos cuando sea tu turno."
         r += "\n\nPuedes escribir *cancelar* si cambias de opinion antes de que sea procesado."
-        r += "\n\n*Recuerda: tu pedido sigue PENDIENTE hasta que el negocio lo confirme.*"
         return r
 
     # ── PEDIDO ENVIADO ──
@@ -363,13 +417,29 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
         if "continuar" in msg:
             estado["items"] = [i for i in estado["items"] if i["clave"] != item.get("clave")]
             if not estado["items"]:
+                cola = _colas.get(codigo, [])
+                era_primero = bool(cola) and cola[0] == numero_cliente
+                if numero_cliente in cola:
+                    cola.remove(numero_cliente)
                 _estados.pop(numero_cliente, None)
                 _ordenes_pendientes.pop(numero_cliente, None)
                 _eliminar_pedido(codigo, numero_cliente)
+                if era_primero:
+                    cola_actual = _colas.get(codigo, [])
+                    if cola_actual:
+                        siguiente = cola_actual[0]
+                        _enviar_pedido_a_negocio(negocio["numero_negocio"], siguiente,
+                                                 _ordenes_pendientes[siguiente], twilio_send,
+                                                 prefijo="SIGUIENTE PEDIDO")
+                        twilio_send(siguiente, "Tu pedido está siendo preparado, sale en unos minutos!")
+                        _notificar_posiciones(codigo, twilio_send)
                 return "Tu pedido quedó vacío. Escribe el codigo del negocio cuando quieras hacer un nuevo pedido."
+
+            turno_existente = _ordenes_pendientes.get(numero_cliente, {}).get("turno")
             total = sum(i["precio"] for i in estado["items"])
             _ordenes_pendientes[numero_cliente] = {
                 "codigo": codigo, "items": list(estado["items"]), "total": total,
+                "turno": turno_existente,
                 "direccion": estado["direccion"], "referencia": estado["referencia"],
             }
             _guardar_pedido(codigo, numero_cliente)
@@ -390,8 +460,10 @@ def manejar_pedido(numero_cliente, codigo, mensaje, twilio_send):
         if re.search(r"\blisto\b", msg):
             items = estado["items"]
             total = sum(i["precio"] for i in items)
+            turno_existente = _ordenes_pendientes.get(numero_cliente, {}).get("turno")
             _ordenes_pendientes[numero_cliente] = {
                 "codigo": codigo, "items": list(items), "total": total,
+                "turno": turno_existente,
                 "direccion": estado["direccion"], "referencia": estado["referencia"],
             }
             _guardar_pedido(codigo, numero_cliente)
@@ -463,7 +535,6 @@ def manejar_negocio(numero_negocio, codigo_negocio, mensaje, twilio_send):
     if m:
         buscado = m.group(1).strip()
         print(f"[DEBUG no hay] negocio={codigo_negocio} buscado='{buscado}' ordenes_pendientes={list(_ordenes_pendientes.keys())}")
-        # Itera en orden inverso para tomar el pedido más reciente primero
         for cliente, pedido in reversed(list(_ordenes_pendientes.items())):
             if pedido["codigo"] != codigo_negocio:
                 continue
@@ -483,14 +554,33 @@ def manejar_negocio(numero_negocio, codigo_negocio, mensaje, twilio_send):
 
     # "listo" → pedido despachado
     if re.search(r"\blisto\b", msg):
-        print(f"[DEBUG listo] negocio={codigo_negocio} ordenes_pendientes={list(_ordenes_pendientes.keys())}")
-        for cliente, pedido in list(_ordenes_pendientes.items()):
-            if pedido["codigo"] == codigo_negocio:
-                twilio_send(cliente, "🛵 Tu pedido esta en camino!")
-                _eliminar_pedido(codigo_negocio, cliente)
-                _ordenes_pendientes.pop(cliente, None)
-                _estados.pop(cliente, None)
-                return f"Pedido de {cliente} marcado como completado."
-        return "No hay pedidos pendientes."
+        print(f"[DEBUG listo] negocio={codigo_negocio} cola={_colas.get(codigo_negocio, [])}")
+        cola = _colas.get(codigo_negocio, [])
+        if not cola:
+            return "No hay pedidos pendientes."
+
+        cliente_actual = cola[0]
+        if _estados.get(cliente_actual, {}).get("estado") == "esperando_decision":
+            return "El pedido actual tiene un producto pendiente de decisión del cliente. Espera su respuesta."
+
+        turno_actual = _ordenes_pendientes.get(cliente_actual, {}).get("turno", "?")
+        twilio_send(cliente_actual, "🛵 Tu pedido está en camino!")
+        cola.pop(0)
+        _eliminar_pedido(codigo_negocio, cliente_actual)
+        _ordenes_pendientes.pop(cliente_actual, None)
+        _estados.pop(cliente_actual, None)
+
+        if not cola:
+            return "✅ Listo! No hay más pedidos por ahora."
+
+        siguiente = cola[0]
+        _enviar_pedido_a_negocio(numero_negocio, siguiente,
+                                 _ordenes_pendientes[siguiente], twilio_send,
+                                 prefijo="SIGUIENTE PEDIDO")
+        twilio_send(siguiente, "Tu pedido está siendo preparado, sale en unos minutos!")
+        _notificar_posiciones(codigo_negocio, twilio_send)
+
+        turno_sig = _ordenes_pendientes[siguiente].get("turno", "?")
+        return f"Turno #T-{turno_actual} despachado. Enviando turno #T-{turno_sig} al siguiente."
 
     return None

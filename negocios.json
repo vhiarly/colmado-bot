@@ -86,7 +86,8 @@
           "rebanado": false,
           "activo": true
         }
-      }
+      },
+      "pedidos_activos": []
     },
     "BA1": {
       "nombre": "Carlos Barbero",

@@ -93,9 +93,9 @@ Para tareas de múltiples pasos:
 
 ```
 Proyecto:    Wasapeame
-Repo:        github.com/vhiarly/colmado-bot
+Repo:        github.com/vhiarly/wasapeame
 Twilio:      +1 234 415 1415
-Deploy:      Render (free tier)
+Deploy:      Azure App Service (wasapeame-rg, West Europe)
 Endpoint:    POST /webhook
 Lenguaje:    Python 3 + Flask
 Estado:      En memoria (dict por número de teléfono)
